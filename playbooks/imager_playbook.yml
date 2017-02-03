@@ -1,0 +1,102 @@
+---
+- hosts: remote-wsgi
+  remote_user: ubuntu
+  become: yes
+  environment:
+    DB_USERNAME: "{{ db_user }}"
+    DB_PASSWORD: "{{ db_password }}"
+    DB_NAME: "{{ db_name }}"
+    SECRET_KEY: "{{ secret_key }}"
+    ALLOWED_HOSTS: "localhost,{{ server_dns }}"
+    DB_HOST: "{{ db_host }}"
+    DB_PORT: "5432"
+  tasks:
+    - name: Update the Ubuntu system and services
+      apt: update_cache=yes
+      become_method: sudo
+
+    - name: Upgrade the Ubuntu machine with latest software
+      apt: upgrade=yes
+      become_method: sudo
+
+    - name: Install Basic Unix-level Services
+      apt: name={{ item }} state=latest
+      become_method: sudo
+      with_items:
+        - nginx
+        - python3
+        - python3-pip
+        - python3.4-venv
+        - git
+        - gunicorn
+        - libtiff5-dev
+        - libjpeg8-dev
+        - zlib1g-dev
+        - libfreetype6-dev
+        - liblcms2-dev
+        - libwebp-dev
+        - tcl8.6-dev
+        - tk8.6-dev
+        - python-tk
+        - python-dev
+        - libpq-dev
+
+    - name: Clone Django-Imager
+      git: clone=yes repo={{ git_repo }} dest={{ project_dir }}
+
+    - name: Check if venv exists
+      stat: path={{env_dir}}/bin
+      register: venv_dir
+
+    - name: Create a venv
+      command: python3 -m venv {{ env_dir }}
+      when: venv_dir.stat.isdir is not defined
+
+    - name: Django migrate
+      django_manage: command=migrate
+                     app_path={{ project_dir }}/imagersite
+                     virtualenv={{ env_dir }}
+
+    - name: Django collectstatic
+      django_manage: command=collectstatic
+                     app_path={{ project_dir }}/imagersite
+                     virtualenv={{ env_dir }}
+
+    - name: Make my directory tree readable
+      file:
+        path: "{{project_dir}}/imagersite/MEDIA/"
+        mode:  0777
+
+    - name: Install gunicorn
+      pip: virtualenv={{ env_dir }} name=gunicorn
+      become_method: sudo
+
+    - name: Install Django-Imager requirements
+      pip: virtualenv={{ env_dir }} requirements={{ project_dir }}/requirements.pip
+      become_method: sudo
+
+    - name: Register old nginx default file
+      stat: path=/etc/nginx/sites-enabled/default.old
+      become_method: sudo
+      register: default_stat
+
+    - name: Rename old nginx default file
+      become_method: sudo
+      command: mv /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.old
+      when: not default_stat.stat.exists
+
+    - name: Create a new default file for nginx
+      template: src=../templates/nginx_config dest=/etc/nginx/sites-enabled/default
+      become_method: sudo
+
+    - name: Restart nginx service
+      service: name=nginx state=restarted
+      become_method: sudo
+
+    - name: Copy upstart script into /etc/init
+      template: src=../templates/upstart_config dest=/etc/init/imager.conf
+      become_method: sudo
+
+    - name: Restart the imager upstart job
+      service: name=imager state=restarted
+      become_method: sudo

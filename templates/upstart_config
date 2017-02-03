@@ -1,0 +1,19 @@
+description "Gunicorn application server handling imagersite"
+
+start on runlevel [2345]
+stop on runlevel [!2345]
+
+respawn
+setuid ubuntu
+setgid www-data
+chdir {{project_dir}}/imagersite
+
+env DB_USERNAME="{{ db_user }}"
+env DB_PASSWORD="{{ db_password }}"
+env DB_NAME="{{ db_name }}"
+env SECRET_KEY="{{ secret_key }}"
+env ALLOWED_HOSTS="localhost,{{ server_dns }}"
+env DB_HOST="{{ db_host }}"
+env DB_PORT="5432"
+
+exec {{env_dir}}/bin/gunicorn -b :8000 imagersite.wsgi:application
